@@ -26,15 +26,44 @@ fn linear_to_srgb(val: f32) -> u8 {
 }
 
 #[derive(Debug)]
+struct Scatter {
+    scattered: Ray,
+    attenuation: Vector3,
+}
+
+trait Scatterable {
+    fn scatter(&self, ray_in: &Ray, hit: &Hit) -> Option<Scatter>;
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Lambertian {
+    albedo: Vector3,
+}
+
+impl Scatterable for Lambertian {
+    fn scatter(&self, ray_in: &Ray, hit: &Hit) -> Option<Scatter> {
+        let target = hit.position + hit.normal + random_in_unit_sphere();
+        let scattered = Ray {
+            origin: hit.position + 0.001,
+            direction: target - hit.position,
+        };
+        return Some(Scatter {
+            attenuation: self.albedo,
+            scattered: scattered,
+        });
+    }
+}
+
 struct Hit {
     position: Vector3,
     normal: Vector3,
     t: f32,
+    material: Box<Scatterable + 'static>,
 }
 
-trait Hitable {
-    fn hit(&self, ray: &Ray) -> Hit;
-}
+// trait Hitable {
+//     fn hit(&self, ray: &Ray) -> Hit;
+// }
 
 impl Hit {
     fn new() -> Hit {
@@ -42,6 +71,9 @@ impl Hit {
             position: Vector3::origin(),
             normal: Vector3::origin(),
             t: 0.0,
+            material: Box::new(Lambertian {
+                albedo: Vector3::new(0.5, 0.5, 0.5),
+            }),
         }
     }
 }
@@ -61,15 +93,15 @@ impl Sphere {
     }
 }
 
-impl Hitable for Sphere {
-    fn hit(&self, _ray: &Ray) -> Hit {
-        Hit {
-            position: Vector3::origin(),
-            normal: Vector3::origin(),
-            t: 0.0,
-        }
-    }
-}
+// impl Hitable for Sphere {
+//     fn hit(&self, _ray: &Ray) -> Hit {
+//         Hit {
+//             position: Vector3::origin(),
+//             normal: Vector3::origin(),
+//             t: 0.0,
+//         }
+//     }
+// }
 
 #[derive(Copy, Clone)]
 struct Camera {
@@ -147,6 +179,9 @@ fn ray_sphere_intersection(ray: &Ray, sphere: &Sphere, t_min: f32, t_max: f32) -
                 position: hit_position,
                 normal: hit_normal.normalize(),
                 t: t,
+                material: Box::new(Lambertian {
+                    albedo: Vector3::new(0.5, 0.5, 0.5),
+                }),
             });
         }
 
@@ -158,6 +193,9 @@ fn ray_sphere_intersection(ray: &Ray, sphere: &Sphere, t_min: f32, t_max: f32) -
                 position: hit_position,
                 normal: hit_normal,
                 t: t,
+                material: Box::new(Lambertian {
+                    albedo: Vector3::new(0.5, 0.5, 0.5),
+                }),
             });
         }
     }
@@ -190,12 +228,15 @@ fn trace(ray: &Ray, spheres: &[Sphere], _depth: i32) -> Vector3 {
     let result = intersect_scene(&ray, &spheres, KMIN_T, KMAX_T);
     match result {
         Some(hit) => {
-            let target = hit.position + hit.normal + random_in_unit_sphere();
-            let new_ray = Ray {
-                origin: hit.position + 0.001,
-                direction: target - hit.position,
-            };
-            return trace(&new_ray, &spheres, 1) * 0.5;
+            let scatter = hit.material.scatter(&ray, &hit);
+            match scatter {
+                Some(scattered) => {
+                    return trace(&scattered.scattered, &spheres, 1) * scattered.attenuation;
+                }
+                None => {
+                    return Vector3::origin();
+                }
+            }
         }
         None => {
             let unit_direction = ray.direction.normalize();
@@ -220,7 +261,7 @@ fn main() {
 
     let screen_height = 400;
     let screen_width = 600;
-    let spp = 4;
+    let spp = 64;
 
     let camera = Camera::initialize(
         look_from,
