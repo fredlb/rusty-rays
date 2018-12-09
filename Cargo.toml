@@ -1,0 +1,10 @@
+[package]
+name = "rust_ray"
+version = "0.1.0"
+authors = ["Fredrik Lindner <fredrik@epidemicsound.com>"]
+
+[dependencies]
+rand = "0.5"
+image = "*"
+time = "*"
+threadpool = "*"
