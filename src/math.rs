@@ -81,17 +81,30 @@ impl ops::Mul<f32> for Vector3 {
     }
 }
 
+impl<'a> ops::Mul<&'a Vector3> for f32 {
+    type Output = Vector3;
+
+    fn mul(self, rhs: &Vector3) -> Vector3 {
+        Vector3 {
+            x: self * rhs.x,
+            y: self * rhs.y,
+            z: self * rhs.z,
+        }
+    }
+}
+
 impl ops::Mul for Vector3 {
     type Output = Vector3;
 
     fn mul(self, rhs: Vector3) -> Vector3 {
         Vector3 {
             x: self.x * rhs.x,
-            y: self.y * rhs.x,
-            z: self.z * rhs.x,
+            y: self.y * rhs.y,
+            z: self.z * rhs.z,
         }
     }
 }
+
 impl ops::Add<f32> for Vector3 {
     type Output = Vector3;
 

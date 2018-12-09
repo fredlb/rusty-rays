@@ -31,7 +31,7 @@ struct Scatter {
     attenuation: Vector3,
 }
 
-trait Scatterable {
+trait Material {
     fn scatter(&self, ray_in: &Ray, hit: &Hit) -> Option<Scatter>;
 }
 
@@ -40,7 +40,12 @@ struct Lambertian {
     albedo: Vector3,
 }
 
-impl Scatterable for Lambertian {
+#[derive(Debug, Copy, Clone)]
+struct Metal {
+    albedo: Vector3,
+}
+
+impl Material for Lambertian {
     fn scatter(&self, ray_in: &Ray, hit: &Hit) -> Option<Scatter> {
         let target = hit.position + hit.normal + random_in_unit_sphere();
         let scattered = Ray {
@@ -54,54 +59,40 @@ impl Scatterable for Lambertian {
     }
 }
 
-struct Hit {
+fn reflect(v: &Vector3, n: &Vector3) -> Vector3 {
+    *v - 2.0 * dot(v, n) * n
+}
+
+impl Material for Metal {
+    fn scatter(&self, ray_in: &Ray, hit: &Hit) -> Option<Scatter> {
+        let reflected = reflect(&ray_in.direction.normalize(), &hit.normal);
+        let scattered = Ray {
+            origin: hit.position,
+            direction: reflected,
+        };
+        if dot(&scattered.direction, &hit.normal) > 0.0 {
+            return Some(Scatter {
+                attenuation: self.albedo,
+                scattered: scattered,
+            });
+        } else {
+            return None;
+        }
+    }
+}
+
+struct Hit<'a> {
     position: Vector3,
     normal: Vector3,
     t: f32,
-    material: Box<Scatterable + 'static>,
+    material: &'a Box<Material + Send + Sync + 'a>,
 }
 
-// trait Hitable {
-//     fn hit(&self, ray: &Ray) -> Hit;
-// }
-
-impl Hit {
-    fn new() -> Hit {
-        Hit {
-            position: Vector3::origin(),
-            normal: Vector3::origin(),
-            t: 0.0,
-            material: Box::new(Lambertian {
-                albedo: Vector3::new(0.5, 0.5, 0.5),
-            }),
-        }
-    }
-}
-
-#[derive(Copy, Clone)]
 struct Sphere {
     radius: f32,
     position: Vector3,
+    material: Box<Material + Send + Sync>,
 }
-
-impl Sphere {
-    fn new(position: Vector3, radius: f32) -> Sphere {
-        Sphere {
-            position: position,
-            radius: radius,
-        }
-    }
-}
-
-// impl Hitable for Sphere {
-//     fn hit(&self, _ray: &Ray) -> Hit {
-//         Hit {
-//             position: Vector3::origin(),
-//             normal: Vector3::origin(),
-//             t: 0.0,
-//         }
-//     }
-// }
 
 #[derive(Copy, Clone)]
 struct Camera {
@@ -162,7 +153,12 @@ impl Camera {
     }
 }
 
-fn ray_sphere_intersection(ray: &Ray, sphere: &Sphere, t_min: f32, t_max: f32) -> Option<Hit> {
+fn ray_sphere_intersection<'a>(
+    ray: &Ray,
+    sphere: &'a Sphere,
+    t_min: f32,
+    t_max: f32,
+) -> Option<Hit<'a>> {
     let oc = ray.origin - sphere.position;
     let a = dot(&ray.direction, &ray.direction);
     let b = dot(&oc, &ray.direction);
@@ -179,9 +175,7 @@ fn ray_sphere_intersection(ray: &Ray, sphere: &Sphere, t_min: f32, t_max: f32) -
                 position: hit_position,
                 normal: hit_normal.normalize(),
                 t: t,
-                material: Box::new(Lambertian {
-                    albedo: Vector3::new(0.5, 0.5, 0.5),
-                }),
+                material: &sphere.material,
             });
         }
 
@@ -193,45 +187,49 @@ fn ray_sphere_intersection(ray: &Ray, sphere: &Sphere, t_min: f32, t_max: f32) -
                 position: hit_position,
                 normal: hit_normal,
                 t: t,
-                material: Box::new(Lambertian {
-                    albedo: Vector3::new(0.5, 0.5, 0.5),
-                }),
+                material: &sphere.material,
             });
         }
     }
     return None;
 }
 
-fn intersect_scene(ray: &Ray, spheres: &[Sphere], t_min: f32, t_max: f32) -> Option<Hit> {
+fn intersect_scene<'a>(
+    ray: &Ray,
+    spheres: &'a [Sphere],
+    t_min: f32,
+    t_max: f32,
+) -> Option<Hit<'a>> {
     let mut closest_t = t_max;
-    let mut closest_hit = Hit::new();
-    let mut did_hit_anything = false;
+    let mut closest_hit = None;
     for i in 0..spheres.len() {
         let result = ray_sphere_intersection(&ray, &spheres[i], t_min, closest_t);
-        match result {
+        closest_hit = match result {
             Some(hit) => {
-                did_hit_anything = true;
-                closest_t = hit.t;
-                closest_hit = hit;
+                if hit.t > KMIN_T && hit.t < closest_t {
+                    closest_t = hit.t;
+                    Some(hit)
+                } else {
+                    closest_hit
+                }
             }
-            None => {}
-        }
+            None => closest_hit,
+        };
     }
-    if did_hit_anything {
-        return Some(closest_hit);
-    } else {
-        return None;
-    }
+    closest_hit
 }
 
-fn trace(ray: &Ray, spheres: &[Sphere], _depth: i32) -> Vector3 {
+fn trace(ray: &Ray, spheres: &[Sphere], depth: i32) -> Vector3 {
+    if depth > 50 {
+        return Vector3::origin();
+    }
     let result = intersect_scene(&ray, &spheres, KMIN_T, KMAX_T);
     match result {
         Some(hit) => {
             let scatter = hit.material.scatter(&ray, &hit);
             match scatter {
                 Some(scattered) => {
-                    return trace(&scattered.scattered, &spheres, 1) * scattered.attenuation;
+                    return trace(&scattered.scattered, &spheres, depth + 1) * scattered.attenuation;
                 }
                 None => {
                     return Vector3::origin();
@@ -248,11 +246,35 @@ fn trace(ray: &Ray, spheres: &[Sphere], _depth: i32) -> Vector3 {
 
 fn main() {
     let start = PreciseTime::now();
-
-    let sphere_1 = Sphere::new(Vector3::new(0.5, 0.01, -1.0), 0.5);
-    let sphere_2 = Sphere::new(Vector3::new(0.0, -10000.5, -1.0), 10000.0);
-    let sphere_3 = Sphere::new(Vector3::new(-0.2, -0.295, -1.0), 0.2);
-    let spheres = [sphere_1, sphere_2, sphere_3];
+    let sphere_1 = Sphere {
+        position: Vector3::new(0.5, 0.01, -1.0),
+        radius: 0.5,
+        material: Box::new(Lambertian {
+            albedo: Vector3::new(1.0, 0.1, 0.1),
+        }),
+    };
+    let sphere_2 = Sphere {
+        position: Vector3::new(0.5, -10000.5, -1.0),
+        radius: 10000.0,
+        material: Box::new(Lambertian {
+            albedo: Vector3::new(0.5, 0.5, 0.8),
+        }),
+    };
+    let sphere_3 = Sphere {
+        position: Vector3::new(-0.2, -0.295, -1.0),
+        radius: 0.2,
+        material: Box::new(Metal {
+            albedo: Vector3::new(0.5, 0.5, 0.5),
+        }),
+    };
+    let sphere_4 = Sphere {
+        position: Vector3::new(-0.8, 0.5, -3.0),
+        radius: 1.0,
+        material: Box::new(Metal {
+            albedo: Vector3::new(0.5, 0.5, 0.5),
+        }),
+    };
+    let spheres = Arc::new(vec![sphere_1, sphere_2, sphere_3, sphere_4]);
 
     let look_from = Vector3::new(0.0, 0.0, 3.0);
     let look_at = Vector3::new(0.0, 0.0, -1.0);
@@ -261,7 +283,7 @@ fn main() {
 
     let screen_height = 400;
     let screen_width = 600;
-    let spp = 64;
+    let spp = 128;
 
     let camera = Camera::initialize(
         look_from,
@@ -281,7 +303,7 @@ fn main() {
     let threads = 4;
     for t in 0..threads {
         let mut i = t;
-
+        let local_scene = spheres.clone();
         let imagebuf = Arc::clone(&imgbuf);
         let handle = thread::spawn(move || {
             while i < screen_height {
@@ -291,7 +313,7 @@ fn main() {
                         let u: f32 = (j as f32 + rand::random::<f32>()) / screen_width as f32;
                         let v: f32 = (i as f32 + rand::random::<f32>()) / screen_height as f32;
                         let ray = &camera.clone().make_ray(u, v);
-                        color = color + trace(&ray, &spheres.clone(), 1);
+                        color = color + trace(&ray, &local_scene, 0);
                     }
                     let mut image = imagebuf.lock().unwrap();
                     let pixel = image::Rgb([
