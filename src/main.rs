@@ -164,11 +164,10 @@ fn ray_sphere_intersection(ray: &Ray, sphere: &Sphere, t_min: f32, t_max: f32) -
     return None;
 }
 
-fn intersect_scene(ray: &Ray, spheres: &[Sphere], t_min: f32, t_max: f32) -> (Hit, i32, bool) {
+fn intersect_scene(ray: &Ray, spheres: &[Sphere], t_min: f32, t_max: f32) -> Option<Hit> {
     let mut closest_t = t_max;
     let mut closest_hit = Hit::new();
     let mut did_hit_anything = false;
-    let mut hit_id: i32 = 0;
     for i in 0..spheres.len() {
         let result = ray_sphere_intersection(&ray, &spheres[i], t_min, closest_t);
         match result {
@@ -176,27 +175,34 @@ fn intersect_scene(ray: &Ray, spheres: &[Sphere], t_min: f32, t_max: f32) -> (Hi
                 did_hit_anything = true;
                 closest_t = hit.t;
                 closest_hit = hit;
-                hit_id = i as i32;
             }
             None => {}
         }
     }
-    return (closest_hit, hit_id, did_hit_anything);
+    if did_hit_anything {
+        return Some(closest_hit);
+    } else {
+        return None;
+    }
 }
 
 fn trace(ray: &Ray, spheres: &[Sphere], _depth: i32) -> Vector3 {
-    let (hit, _id, did_hit) = intersect_scene(&ray, &spheres, KMIN_T, KMAX_T);
-    if did_hit {
-        let target = hit.position + hit.normal + random_in_unit_sphere();
-        let new_ray = Ray {
-            origin: hit.position + 0.001,
-            direction: target - hit.position,
-        };
-        return trace(&new_ray, &spheres, 1) * 0.5;
+    let result = intersect_scene(&ray, &spheres, KMIN_T, KMAX_T);
+    match result {
+        Some(hit) => {
+            let target = hit.position + hit.normal + random_in_unit_sphere();
+            let new_ray = Ray {
+                origin: hit.position + 0.001,
+                direction: target - hit.position,
+            };
+            return trace(&new_ray, &spheres, 1) * 0.5;
+        }
+        None => {
+            let unit_direction = ray.direction.normalize();
+            let t = 0.5 * (unit_direction.y + 1.0);
+            return Vector3::new(1.0, 1.0, 1.0) * (1.0 - t) + Vector3::new(0.5, 0.7, 1.0) * t;
+        }
     }
-    let unit_direction = ray.direction.normalize();
-    let t = 0.5 * (unit_direction.y + 1.0);
-    return Vector3::new(1.0, 1.0, 1.0) * (1.0 - t) + Vector3::new(0.5, 0.7, 1.0) * t;
 }
 
 fn main() {
@@ -212,9 +218,9 @@ fn main() {
     let dist_to_focus = 3.0;
     let aperture = 0.00;
 
-    let screen_height = 800;
-    let screen_width = 1200;
-    let spp = 16;
+    let screen_height = 400;
+    let screen_width = 600;
+    let spp = 4;
 
     let camera = Camera::initialize(
         look_from,
