@@ -278,18 +278,18 @@ fn main() {
 
     let look_from = Vector3::new(0.0, 0.0, 3.0);
     let look_at = Vector3::new(0.0, 0.0, -1.0);
-    let dist_to_focus = 3.0;
-    let aperture = 0.00;
+    let dist_to_focus = 5.5;
+    let aperture = 0.25;
 
     let screen_height = 400;
     let screen_width = 600;
-    let spp = 128;
+    let spp = 1024;
 
     let camera = Camera::initialize(
         look_from,
         look_at,
         Vector3::new(0.0, 1.0, 0.0),
-        30.0,
+        25.0,
         screen_width as f32 / screen_height as f32,
         aperture,
         dist_to_focus,
